@@ -62,7 +62,54 @@ def build_chain() -> Any:
     Use the vision-capable DeepSeek Flash model named
     ``deepseek-v4-flash-vision-exp``. The API key is loaded from .env.
     """
-    ### YOUR CODE HERE
+    import os
+
+    from langchain_core.prompts import ChatPromptTemplate
+    from langchain_deepseek import ChatDeepSeek
+
+    if not os.environ.get("DEEPSEEK_API_KEY"):
+        raise RuntimeError(
+            "DEEPSEEK_API_KEY is missing. Add it to your local .env file "
+            "or set it as an environment variable."
+        )
+
+    model = ChatDeepSeek(
+        model="deepseek-v4-flash-vision-exp",
+        temperature=0,
+        max_tokens=500,
+        max_retries=2,
+        timeout=60,
+    )
+
+    prompt = ChatPromptTemplate.from_messages(
+        [
+            (
+                "system",
+                "You read supermarket receipts carefully. Return only one valid "
+                "JSON object with these fields: final_payment_hkd, "
+                "subtotal_hkd, and discounts_hkd. Use numbers or numeric strings "
+                "in HKD, without currency symbols or thousands separators. "
+                "final_payment_hkd is the actual amount paid after ROUNDING. "
+                "subtotal_hkd is the receipt's SUBTOTAL before ROUNDING. "
+                "discounts_hkd is a list containing every discount, promotion, "
+                "or coupon amount as a positive number. Do not include ROUNDING "
+                "in discounts_hkd. If a field cannot be read, return null for "
+                "that field instead of guessing. Do not include explanations, "
+                "item prices, percentages, or any other numbers.",
+            ),
+            (
+                "human",
+                [
+                    {
+                        "type": "text",
+                        "text": "Read the payment, subtotal, and all discount lines from this receipt.",
+                    },
+                    {"type": "image_url", "image_url": "{image_url}"},
+                ],
+            ),
+        ]
+    )
+    return prompt | model
     return None
 
 
@@ -78,8 +125,63 @@ def answer_queries(chain: Any, images: list[Path]) -> dict[str, Any]:
     multimodal human messages. LangChain's ``batch`` method is one simple way
     to process independent receipt-extraction prompts in parallel.
     """
-    ### YOUR CODE HERE
-    _ = (chain, images)
+ if not images:
+        raise ValueError("At least one receipt image is required.")
+
+    def parse_receipt_response(response: Any, image: Path) -> dict[str, Any]:
+        text = response_text(response)
+        text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text.strip(), flags=re.IGNORECASE)
+
+        try:
+            data = json.loads(text)
+        except json.JSONDecodeError:
+            start = text.find("{")
+            end = text.rfind("}")
+            if start < 0 or end <= start:
+                raise ValueError(f"The model did not return a JSON object for {image.name}.")
+            try:
+                data = json.loads(text[start : end + 1])
+            except json.JSONDecodeError as error:
+                raise ValueError(f"The model returned invalid JSON for {image.name}.") from error
+
+        if not isinstance(data, dict):
+            raise ValueError(f"The model response for {image.name} must be a JSON object.")
+        return data
+
+    def money_amount(value: Any, field: str, image: Path) -> Decimal:
+        if value is None or isinstance(value, bool):
+            raise ValueError(f"The model could not read {field} from {image.name}.")
+        try:
+            amount = Decimal(str(value).replace(",", "").replace("HK$", "").strip())
+        except (InvalidOperation, ValueError):
+            raise ValueError(f"The model returned an invalid {field} for {image.name}.") from None
+        if not amount.is_finite():
+            raise ValueError(f"The model returned an invalid {field} for {image.name}.")
+        if amount < 0 and field == "discount":
+            amount = amount.copy_abs()
+        elif amount < 0:
+            raise ValueError(f"The model returned an invalid {field} for {image.name}.")
+        return amount.quantize(Decimal("0.01"))
+
+    total_paid = Decimal("0.00")
+    total_without_discounts = Decimal("0.00")
+
+    for image in images:
+        response = chain.invoke({"image_url": image_data_url(image)})
+        receipt = parse_receipt_response(response, image)
+
+        paid = money_amount(receipt.get("final_payment_hkd"), "final payment", image)
+        subtotal = money_amount(receipt.get("subtotal_hkd"), "subtotal", image)
+        discounts = receipt.get("discounts_hkd")
+        if not isinstance(discounts, list):
+            raise ValueError(f"The model did not return a discount list for {image.name}.")
+
+        discount_total = sum(
+            (money_amount(value, "discount", image) for value in discounts),
+            Decimal("0.00"),
+        )
+        total_paid += paid
+        total_without_discounts += subtotal + discount_total
     return {QUERY_1: DUMMY_RESPONSE, QUERY_2: DUMMY_RESPONSE}
 
 
