@@ -124,7 +124,7 @@ def answer_queries(chain: Any, images: list[Path]) -> dict[str, Any]:
     multimodal human messages. LangChain's ``batch`` method is one simple way
     to process independent receipt-extraction prompts in parallel.
     """
- if not images:
+    if not images:
         raise ValueError("At least one receipt image is required.")
 
     def parse_receipt_response(response: Any, image: Path) -> dict[str, Any]:
