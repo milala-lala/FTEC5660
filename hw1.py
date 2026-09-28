@@ -110,7 +110,6 @@ def build_chain() -> Any:
         ]
     )
     return prompt | model
-    return None
 
 
 def answer_queries(chain: Any, images: list[Path]) -> dict[str, Any]:
