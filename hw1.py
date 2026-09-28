@@ -76,9 +76,10 @@ def build_chain() -> Any:
     model = ChatDeepSeek(
         model="deepseek-v4-flash-vision-exp",
         temperature=0,
-        max_tokens=500,
+        max_tokens=2048,
         max_retries=2,
         timeout=60,
+        extra_body={"thinking": {"type": "disabled"}}
     )
 
     prompt = ChatPromptTemplate.from_messages(
