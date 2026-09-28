@@ -182,7 +182,7 @@ def answer_queries(chain: Any, images: list[Path]) -> dict[str, Any]:
         )
         total_paid += paid
         total_without_discounts += subtotal + discount_total
-    return {QUERY_1: DUMMY_RESPONSE, QUERY_2: DUMMY_RESPONSE}
+    return {QUERY_1: f"HK${total_paid:.2f}", QUERY_2: f"HK${total_without_discounts:.2f}"}
 
 
 # Everything below is provided runner/scoring code. No edits are needed.
